@@ -342,7 +342,8 @@ rtps:
   - id: 159
     msg: EstimatorEventFlags
   - id: 160
-    msg: Event
+    msg: ArmRotation
+    send: true
   - alias: ActuatorControls
     id: 180
     msg: ActuatorControls0

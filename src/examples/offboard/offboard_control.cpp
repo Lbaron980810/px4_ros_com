@@ -51,6 +51,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <stdint.h>
 
+#include <cmath>
 #include <chrono>
 #include <iostream>
 
@@ -58,9 +59,11 @@ using namespace std::chrono;
 using namespace std::chrono_literals;
 using namespace px4_msgs::msg;
 
-class OffboardControl : public rclcpp::Node {
+class OffboardControl : public rclcpp::Node
+{
 public:
-	OffboardControl() : Node("offboard_control") {
+	OffboardControl() : Node("offboard_control")
+	{
 #ifdef ROS_DEFAULT_API
 		offboard_control_mode_publisher_ =
 			this->create_publisher<OffboardControlMode>("OffboardControlMode_PubSubTopic", 10);
@@ -72,7 +75,7 @@ public:
 		offboard_control_mode_publisher_ =
 			this->create_publisher<OffboardControlMode>("OffboardControlMode_PubSubTopic");
 		trajectory_setpoint_publisher_ =
-		 	this->create_publisher<TrajectorySetpoint>("TrajectorySetpoint_PubSubTopic");
+			this->create_publisher<TrajectorySetpoint>("TrajectorySetpoint_PubSubTopic");
 		vehicle_command_publisher_ =
 			this->create_publisher<VehicleCommand>("VehicleCommand_PubSubTopic");
 #endif
@@ -80,15 +83,17 @@ public:
 		// get common timestamp
 		timesync_sub_ =
 			this->create_subscription<px4_msgs::msg::Timesync>("Timesync_PubSubTopic", 10,
-				[this](const px4_msgs::msg::Timesync::UniquePtr msg) {
-					timestamp_.store(msg->timestamp);
-				});
+															   [this](const px4_msgs::msg::Timesync::UniquePtr msg)
+															   {
+																   timestamp_.store(msg->timestamp);
+															   });
 
 		offboard_setpoint_counter_ = 0;
 
-		auto timer_callback = [this]() -> void {
-
-			if (offboard_setpoint_counter_ == 10) {
+		auto timer_callback = [this]() -> void
+		{
+			if (offboard_setpoint_counter_ == 10)
+			{
 				// Change to Offboard mode after 10 setpoints
 				this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
 
@@ -96,12 +101,13 @@ public:
 				this->arm();
 			}
 
-            		// offboard_control_mode needs to be paired with trajectory_setpoint
+			// offboard_control_mode needs to be paired with trajectory_setpoint
 			publish_offboard_control_mode();
 			publish_trajectory_setpoint();
 
-           		 // stop the counter after reaching 11
-			if (offboard_setpoint_counter_ < 11) {
+			// stop the counter after reaching 11
+			if (offboard_setpoint_counter_ < 11)
+			{
 				offboard_setpoint_counter_++;
 			}
 		};
@@ -119,20 +125,21 @@ private:
 	rclcpp::Publisher<VehicleCommand>::SharedPtr vehicle_command_publisher_;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr timesync_sub_;
 
-	std::atomic<uint64_t> timestamp_;   //!< common synced timestamped
+	std::atomic<uint64_t> timestamp_; //!< common synced timestamped
 
-	uint64_t offboard_setpoint_counter_;   //!< counter for the number of setpoints sent
+	uint64_t offboard_setpoint_counter_; //!< counter for the number of setpoints sent
 
 	void publish_offboard_control_mode() const;
 	void publish_trajectory_setpoint() const;
 	void publish_vehicle_command(uint16_t command, float param1 = 0.0,
-				     float param2 = 0.0) const;
+								 float param2 = 0.0) const;
 };
 
 /**
  * @brief Send a command to Arm the vehicle
  */
-void OffboardControl::arm() const {
+void OffboardControl::arm() const
+{
 	publish_vehicle_command(VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0);
 
 	RCLCPP_INFO(this->get_logger(), "Arm command send");
@@ -141,7 +148,8 @@ void OffboardControl::arm() const {
 /**
  * @brief Send a command to Disarm the vehicle
  */
-void OffboardControl::disarm() const {
+void OffboardControl::disarm() const
+{
 	publish_vehicle_command(VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0);
 
 	RCLCPP_INFO(this->get_logger(), "Disarm command send");
@@ -151,7 +159,8 @@ void OffboardControl::disarm() const {
  * @brief Publish the offboard control mode.
  *        For this example, only position and altitude controls are active.
  */
-void OffboardControl::publish_offboard_control_mode() const {
+void OffboardControl::publish_offboard_control_mode() const
+{
 	OffboardControlMode msg{};
 	msg.timestamp = timestamp_.load();
 	msg.position = true;
@@ -163,19 +172,22 @@ void OffboardControl::publish_offboard_control_mode() const {
 	offboard_control_mode_publisher_->publish(msg);
 }
 
-
 /**
  * @brief Publish a trajectory setpoint
  *        For this example, it sends a trajectory setpoint to make the
  *        vehicle hover at 5 meters with a yaw angle of 180 degrees.
  */
-void OffboardControl::publish_trajectory_setpoint() const {
+void OffboardControl::publish_trajectory_setpoint() const
+{
 	TrajectorySetpoint msg{};
-	msg.timestamp = timestamp_.load();
-	msg.x = 0.0;
-	msg.y = 0.0;
-	msg.z = -5.0;
-	msg.yaw = -3.14; // [-PI:PI]
+	const uint64_t t = timestamp_.load();
+	msg.timestamp = t;
+	msg.x = 4 + 4 * cos(0.5 * 1e-6 * t);
+	msg.y = 0 + 4 * sin(0.5 * 1e-6 * t);
+	msg.z = -4.0 + sin(0.5 * 1e-6 * t);
+	msg.roll = sin(0.5 * 1e-6 * t);
+	msg.pitch = sin(0.5 * 1e-6 * t);
+	msg.yaw = 0.5 * 1e-6 * t - M_PI; // [-PI:PI]
 
 	trajectory_setpoint_publisher_->publish(msg);
 }
@@ -187,7 +199,8 @@ void OffboardControl::publish_trajectory_setpoint() const {
  * @param param2    Command parameter 2
  */
 void OffboardControl::publish_vehicle_command(uint16_t command, float param1,
-					      float param2) const {
+											  float param2) const
+{
 	VehicleCommand msg{};
 	msg.timestamp = timestamp_.load();
 	msg.param1 = param1;
@@ -202,7 +215,8 @@ void OffboardControl::publish_vehicle_command(uint16_t command, float param1,
 	vehicle_command_publisher_->publish(msg);
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
 	std::cout << "Starting offboard control node..." << std::endl;
 	setvbuf(stdout, NULL, _IONBF, BUFSIZ);
 	rclcpp::init(argc, argv);
