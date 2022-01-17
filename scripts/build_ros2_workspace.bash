@@ -122,7 +122,7 @@ fi
 
 # build px4_ros_com package, except the ros1_bridge
 [ ! -v $verbose ] && colcon_output=$(echo "--event-handlers console_direct+")
-cd $ROS_WS_DIR && colcon build --cmake-args -DCMAKE_BUILD_TYPE=RELWITHDEBINFO --symlink-install --packages-skip ros1_bridge custom_gazebo_plugins $colcon_output
+cd $ROS_WS_DIR && colcon build --cmake-args -DCMAKE_BUILD_TYPE=RELWITHDEBINFO --symlink-install --packages-skip ros1_bridge $colcon_output
 
 # source the ROS2 workspace environment so to have it ready to use
 source $ROS_WS_DIR/install/setup.bash
