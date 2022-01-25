@@ -261,6 +261,7 @@ rtps:
     msg: SensorGyroFifo
   - id: 120
     msg: VehicleImu
+    send: true
   - id: 121
     msg: VehicleImuStatus
   - id: 122
@@ -408,6 +409,7 @@ rtps:
   - alias: VehicleOdometry
     id: 199
     msg: EstimatorVisualOdometryAligned
+    send: true
   - alias: EstimatorInnovations
     id: 200
     msg: EstimatorInnovationVariances
