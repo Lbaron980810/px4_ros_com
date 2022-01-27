@@ -126,11 +126,13 @@ private:
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr timesync_sub_;
 
 	std::atomic<uint64_t> timestamp_; //!< common synced timestamped
+	uint64_t t0_{};
+	bool t0_set_{false};
 
 	uint64_t offboard_setpoint_counter_; //!< counter for the number of setpoints sent
 
 	void publish_offboard_control_mode() const;
-	void publish_trajectory_setpoint() const;
+	void publish_trajectory_setpoint();
 	void publish_vehicle_command(uint16_t command, float param1 = 0.0,
 								 float param2 = 0.0) const;
 };
@@ -177,17 +179,24 @@ void OffboardControl::publish_offboard_control_mode() const
  *        For this example, it sends a trajectory setpoint to make the
  *        vehicle hover at 5 meters with a yaw angle of 180 degrees.
  */
-void OffboardControl::publish_trajectory_setpoint() const
+void OffboardControl::publish_trajectory_setpoint()
 {
+	if(offboard_setpoint_counter_ == 11 && (!t0_set_))
+	{
+		t0_ = timestamp_.load();
+		t0_set_ = true;
+	}
+	
 	TrajectorySetpoint msg{};
-	const uint64_t t = timestamp_.load();
+	uint64_t t = timestamp_.load();
+	float theta = 0.3 * 1e-6 * (t - t0_);
 	msg.timestamp = t;
-	msg.x = 4 + 4 * cos(0.5 * 1e-6 * t);
-	msg.y = 0 + 4 * sin(0.5 * 1e-6 * t);
-	msg.z = -4.0 + sin(0.5 * 1e-6 * t);
-	msg.roll = sin(0.5 * 1e-6 * t);
-	msg.pitch = sin(0.5 * 1e-6 * t);
-	msg.yaw = 0.5 * 1e-6 * t - M_PI; // [-PI:PI]
+	msg.x = 0 + 4 * sin(theta);
+	msg.y = 4 - 4 * cos(theta);
+	msg.z = -2.5 + sin(theta);
+	msg.roll = 0 + sin(theta);
+	msg.pitch = 0;
+	msg.yaw = M_PI_2 + theta; // [-PI:PI]
 
 	trajectory_setpoint_publisher_->publish(msg);
 }
