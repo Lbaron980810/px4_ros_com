@@ -189,14 +189,20 @@ void OffboardControl::publish_trajectory_setpoint()
 	
 	TrajectorySetpoint msg{};
 	uint64_t t = timestamp_.load();
+
 	float theta = 0.3 * 1e-6 * (t - t0_);
+
 	msg.timestamp = t;
 	msg.x = 0 + 4 * sin(theta);
 	msg.y = 4 - 4 * cos(theta);
 	msg.z = -2.5 + sin(theta);
 	msg.roll = 0 + sin(theta);
-	msg.pitch = 0;
+	msg.pitch = 0 + sin(theta);
 	msg.yaw = M_PI_2 + theta; // [-PI:PI]
+	while(msg.yaw > M_PI)
+		msg.yaw -= M_PI * 2;
+	while(msg.yaw < -M_PI)
+		msg.yaw += M_PI * 2;
 
 	trajectory_setpoint_publisher_->publish(msg);
 }
