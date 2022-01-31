@@ -50,6 +50,7 @@
 #include <px4_msgs/msg/vehicle_control_mode.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <stdint.h>
+#include <string>
 
 #include <cmath>
 #include <chrono>
@@ -190,21 +191,70 @@ void OffboardControl::publish_trajectory_setpoint()
 	TrajectorySetpoint msg{};
 	uint64_t t = timestamp_.load();
 
-	float theta = 0.3 * 1e-6 * (t - t0_);
+    // circle trajectory
+//	float theta = 0.3 * 1e-6 * (t - t0_);
+//	msg.timestamp = t;
+//	msg.x = 0 + 4 * sin(theta);
+//	msg.y = 4 - 4 * cos(theta);
+//	msg.z = -2.5 + sin(theta);
+//	msg.roll = 0 + sin(theta);
+//	msg.pitch = 0 + sin(theta);
+//	msg.yaw = M_PI_2 + theta; // [-PI:PI]
 
-	msg.timestamp = t;
-	msg.x = 0 + 4 * sin(theta);
-	msg.y = 4 - 4 * cos(theta);
-	msg.z = -2.5 + sin(theta);
-	msg.roll = 0 + sin(theta);
-	msg.pitch = 0 + sin(theta);
-	msg.yaw = M_PI_2 + theta; // [-PI:PI]
+    // 8 shape trajectory
+    double T = 40, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
+    double r = 1.5, h = 2.5, d_h = 0.5;
+    double t_ = 1e-6 * (t - t0_);
+    while(t_ > T)
+        t_ -= T;
+    msg.z = -h - d_h + d_h * cos(2 * M_PI / (2 * t_1 + t_2) * t_);
+    msg.pitch = d_h * 2 * M_PI / (2 * t_1 + t_2) * sin(2 * M_PI / (2 * t_1 + t_2) * t_);
+    if(t_ >= 0 && t_ < t_1)
+    {
+        msg.x = 0;
+        msg.y = r / t_1 * t_;
+        msg.roll = 0;
+        msg.yaw = M_PI_2;
+    }
+    if(t_ >= t_1 && t_ < t_1 + t_2)
+    {
+        double omega = 3 * M_PI / (2 * t_2);
+        msg.x = -r + r * cos(omega * (t_ - t_1));
+        msg.y = r + r * sin(omega * (t_ - t_1));
+        msg.roll = M_PI / 4 - M_PI / 4 * cos(2 * M_PI / t_2 * (t_ - t_1));
+        msg.yaw = M_PI / 2 + omega * (t_ - t_1);
+    }
+    if(t_ >= t_1 + t_2 && t_ < 3 * t_1 + t_2)
+    {
+        msg.x = -r + r / t_1 * (t_ - t_1 - t_2);
+        msg.y = 0;
+        msg.roll = 0;
+        msg.yaw = 0;
+    }
+    if(t_ >= 3 * t_1 + t_2 && t_ < T - t_1)
+    {
+        double omega = 3 * M_PI / (2 * t_2);
+        msg.x = r + r * sin(omega * (t_ - 3 * t_1 - t_2));
+        msg.y = -r + r * cos(omega * (t_ - 3 * t_1 - t_2));
+        msg.roll = -M_PI / 4 + M_PI / 4 * cos(2 * M_PI / t_2 * (t_ - 3 * t_1 - t_2));
+        msg.yaw = -omega * (t_ - 3 * t_1 - t_2);
+    }
+    if(t_ >= T - t_1 && t_ < T)
+    {
+        msg.x = 0;
+        msg.y = -r + r / t_1 * (t_ - (T - t_1));
+        msg.roll = 0;
+        msg.yaw = M_PI_2;
+    }
+
+
 	while(msg.yaw > M_PI)
 		msg.yaw -= M_PI * 2;
 	while(msg.yaw < -M_PI)
 		msg.yaw += M_PI * 2;
 
-	trajectory_setpoint_publisher_->publish(msg);
+    if(t0_set_)
+	    trajectory_setpoint_publisher_->publish(msg);
 }
 
 /**
