@@ -3,8 +3,10 @@ rtps:
     msg: ActuatorArmed
   - id: 1
     msg: ActuatorControls
+    send: true
   - id: 3
     msg: ActuatorOutputs
+    send: true
   - id: 4
     msg: AdcReport
   - id: 5
@@ -348,9 +350,11 @@ rtps:
   - alias: ActuatorControls
     id: 180
     msg: ActuatorControls0
+    send: true
   - alias: ActuatorControls
     id: 181
     msg: ActuatorControls1
+    send: true
   - alias: ActuatorControls
     id: 182
     msg: ActuatorControls2
@@ -449,6 +453,7 @@ rtps:
   - alias: ActuatorControls
     id: 212
     msg: ActuatorControls5
+    send: true
   - alias: Wind
     id: 213
     msg: EstimatorWind
