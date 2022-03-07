@@ -354,7 +354,6 @@ rtps:
   - alias: ActuatorControls
     id: 181
     msg: ActuatorControls1
-    send: true
   - alias: ActuatorControls
     id: 182
     msg: ActuatorControls2
@@ -453,7 +452,6 @@ rtps:
   - alias: ActuatorControls
     id: 212
     msg: ActuatorControls5
-    send: true
   - alias: Wind
     id: 213
     msg: EstimatorWind
