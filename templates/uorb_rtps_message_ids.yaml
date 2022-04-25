@@ -314,8 +314,10 @@ rtps:
     msg: VehicleAngularAccelerationSetpoint
   - id: 144
     msg: VehicleTorqueSetpoint
+    send: true
   - id: 145
     msg: VehicleThrustSetpoint
+    send: true
   - id: 146
     msg: VehicleActuatorSetpoint
   - id: 147
@@ -347,6 +349,9 @@ rtps:
   - id: 160
     msg: ArmRotation
     send: true
+  - id: 161
+    msg: VehicleWrenchSetpoint
+    receive: true
   - alias: ActuatorControls
     id: 180
     msg: ActuatorControls0
