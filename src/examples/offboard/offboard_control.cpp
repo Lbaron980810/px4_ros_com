@@ -48,6 +48,7 @@
 #include <px4_msgs/msg/timesync.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
 #include <px4_msgs/msg/vehicle_control_mode.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <stdint.h>
 #include <string>
@@ -59,6 +60,17 @@
 using namespace std::chrono;
 using namespace std::chrono_literals;
 using namespace px4_msgs::msg;
+
+void setAngularVel(double &wx, double &wy, double &wz,
+                   const double &roll, const double &pitch,
+                   const double &d_roll, const double &d_pitch, const double &d_yaw)
+{
+    double phi = roll;
+    double theta = pitch;
+    wx = d_roll - sin(theta) * d_yaw;
+    wy = cos(phi) * d_pitch + cos(theta) * sin(phi) * d_yaw;
+    wz = -sin(phi) * d_pitch + cos(theta) * cos(phi) * d_yaw;
+}
 
 class OffboardControl : public rclcpp::Node
 {
@@ -72,6 +84,8 @@ public:
 			this->create_publisher<TrajectorySetpoint>("TrajectorySetpoint_PubSubTopic", 10);
 		vehicle_command_publisher_ =
 			this->create_publisher<VehicleCommand>("VehicleCommand_PubSubTopic", 10);
+        log_switch_publisher_ =
+            this->create_publisher<std_msgs::msg::Bool>("L1MPC/LogSwitch", 10);
 #else
 		offboard_control_mode_publisher_ =
 			this->create_publisher<OffboardControlMode>("OffboardControlMode_PubSubTopic");
@@ -124,11 +138,13 @@ private:
 	rclcpp::Publisher<OffboardControlMode>::SharedPtr offboard_control_mode_publisher_;
 	rclcpp::Publisher<TrajectorySetpoint>::SharedPtr trajectory_setpoint_publisher_;
 	rclcpp::Publisher<VehicleCommand>::SharedPtr vehicle_command_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr log_switch_publisher_;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr timesync_sub_;
 
 	std::atomic<uint64_t> timestamp_; //!< common synced timestamped
 	uint64_t t0_{};
 	bool t0_set_{false};
+    int lap_count_{0};
 
 	uint64_t offboard_setpoint_counter_; //!< counter for the number of setpoints sent
 
@@ -136,6 +152,7 @@ private:
 	void publish_trajectory_setpoint();
 	void publish_vehicle_command(uint16_t command, float param1 = 0.0,
 								 float param2 = 0.0) const;
+    bool log_flag_{false};
 };
 
 /**
@@ -167,10 +184,10 @@ void OffboardControl::publish_offboard_control_mode() const
 	OffboardControlMode msg{};
 	msg.timestamp = timestamp_.load();
 	msg.position = true;
-	msg.velocity = false;
+	msg.velocity = true;
 	msg.acceleration = false;
-	msg.attitude = false;
-	msg.body_rate = false;
+	msg.attitude = true;
+	msg.body_rate = true;
 
 	offboard_control_mode_publisher_->publish(msg);
 }
@@ -202,51 +219,112 @@ void OffboardControl::publish_trajectory_setpoint()
 //	msg.yaw = M_PI_2 + theta; // [-PI:PI]
 
     // 8 shape trajectory
-    double T = 40, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
-    double r = 1.5, h = 2.5, d_h = 0.5;
-    double t_ = 1e-6 * (t - t0_);
+    double T = 75, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
+    double r = 0.6, h = 1.4, d_h = 0.3;
+
+    double t_ = 1e-6 * (double)(t - t0_);
+    if(t0_set_ && ((int)t_ / (int)T > lap_count_))
+    {
+        log_flag_ = true;
+        std::cout << "write log status: " << log_flag_ << std::endl;
+        std_msgs::msg::Bool log_switch_msg{};
+        log_switch_msg.data = log_flag_;
+        log_switch_publisher_->publish(log_switch_msg);
+        lap_count_ = (int)t_ / (int)T;
+    }
     while(t_ > T)
         t_ -= T;
+    
     msg.z = -h - d_h + d_h * cos(2 * M_PI / (2 * t_1 + t_2) * t_);
-    msg.pitch = d_h * 2 * M_PI / (2 * t_1 + t_2) * sin(2 * M_PI / (2 * t_1 + t_2) * t_);
+    msg.vz = -d_h * 2 * M_PI / (2 * t_1 + t_2) * sin(2 * M_PI / (2 * t_1 + t_2) * t_);
+
+    msg.pitch = -msg.vz;
+    double dPitch = 4 * pow(M_PI, 2) * d_h * cos(2 * M_PI * t_ / (2 * t_1 + t_2)) / pow((2 * t_1 + t_2), 2);
+    double dRoll, dYaw;
+
     if(t_ >= 0 && t_ < t_1)
     {
         msg.x = 0;
+        msg.vx = 0;
+
         msg.y = r / t_1 * t_;
+        msg.vy = r / t_1;
+
         msg.roll = 0;
+        dRoll = 0;
+
         msg.yaw = M_PI_2;
+        dYaw = 0;
     }
     if(t_ >= t_1 && t_ < t_1 + t_2)
     {
         double omega = 3 * M_PI / (2 * t_2);
+
         msg.x = -r + r * cos(omega * (t_ - t_1));
+        msg.vx = -r * omega * sin(omega*(t_ - t_1));
+
         msg.y = r + r * sin(omega * (t_ - t_1));
+        msg.vy = r * omega * cos(omega * (t_ - t_1));
+
         msg.roll = M_PI / 4 - M_PI / 4 * cos(2 * M_PI / t_2 * (t_ - t_1));
+        dRoll = M_PI / 4 * 2 * M_PI / t_2 * sin(2 * M_PI / t_2 * (t_ - t_1));
+
         msg.yaw = M_PI / 2 + omega * (t_ - t_1);
+        dYaw = omega;
     }
     if(t_ >= t_1 + t_2 && t_ < 3 * t_1 + t_2)
     {
         msg.x = -r + r / t_1 * (t_ - t_1 - t_2);
+        msg.vx = r / t_1;
+
         msg.y = 0;
+        msg.vy = 0;
+
         msg.roll = 0;
+        dRoll = 0;
+
         msg.yaw = 0;
+        dYaw = 0;
     }
     if(t_ >= 3 * t_1 + t_2 && t_ < T - t_1)
     {
         double omega = 3 * M_PI / (2 * t_2);
+
         msg.x = r + r * sin(omega * (t_ - 3 * t_1 - t_2));
+        msg.vx = r * omega * cos(omega * (t_ - 3 * t_1 - t_2));
+
         msg.y = -r + r * cos(omega * (t_ - 3 * t_1 - t_2));
+        msg.vy = -r * omega * sin(omega * (t_ - 3 * t_1 - t_2));
+
         msg.roll = -M_PI / 4 + M_PI / 4 * cos(2 * M_PI / t_2 * (t_ - 3 * t_1 - t_2));
+        dRoll = -M_PI / 4 * 2 * M_PI / t_2 * sin(2 * M_PI / t_2 * (t_ - 3 * t_1 - t_2));
+
         msg.yaw = -omega * (t_ - 3 * t_1 - t_2);
+        dYaw = -omega;
     }
     if(t_ >= T - t_1 && t_ < T)
     {
         msg.x = 0;
+        msg.vx = 0;
+
         msg.y = -r + r / t_1 * (t_ - (T - t_1));
+        msg.vy = r / t_1;
+
         msg.roll = 0;
+        dRoll = 0;
+
         msg.yaw = M_PI_2;
+        dYaw = 0;
     }
 
+    msg.roll *= 6.0/9;
+    dRoll *= 6.0/9;
+
+    double wx, wy, wz;
+    setAngularVel(wx, wy, wz, (double)msg.roll, (double)msg.pitch, dRoll, dPitch, dYaw);
+    msg.rollspeed = wx;
+    msg.pitchspeed = wy;
+    msg.yawspeed = wz;
 
 	while(msg.yaw > M_PI)
 		msg.yaw -= M_PI * 2;

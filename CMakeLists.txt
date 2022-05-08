@@ -43,6 +43,7 @@ find_package(rclcpp REQUIRED)
 get_default_rmw_implementation(rmw_implementation)
 find_package("${rmw_implementation}" REQUIRED)
 
+find_package(std_msgs REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -72,6 +73,7 @@ function(custom_executable subfolder target)
   ament_target_dependencies(${target}
     rclcpp
     px4_msgs
+    std_msgs
   )
   install(TARGETS ${target}
   DESTINATION lib/${PROJECT_NAME})
@@ -103,9 +105,9 @@ custom_executable(examples/offboard offboard_control)
 
 # Export information to downstream packages
 if(ROS_DISTRO IN_LIST ROS_DISTROS)
-  ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs)
+  ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime eigen3_cmake_module Eigen3 px4_msgs geometry_msgs sensor_msgs std_msgs)
 else()
-  ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime Eigen3 px4_msgs geometry_msgs sensor_msgs)
+  ament_export_dependencies(ament_cmake rclcpp rosidl_default_runtime Eigen3 px4_msgs geometry_msgs sensor_msgs std_msgs)
 endif()
 if (ROS_DISTRO IN_LIST USES_DEPRECATED_EXPORT_API)
   ament_export_interfaces(export_frame_transforms HAS_LIBRARY_TARGET)
@@ -113,7 +115,7 @@ else()
   ament_export_targets(export_frame_transforms HAS_LIBRARY_TARGET)
 endif()
 
-ament_export_include_directories(include)
+ament_export_include_directories(include ${Eigen3_INCLUDE_DIRS})
 ament_export_libraries(frame_transforms)
 
 # Install header files
