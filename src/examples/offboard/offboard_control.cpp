@@ -219,8 +219,10 @@ void OffboardControl::publish_trajectory_setpoint()
 //	msg.yaw = M_PI_2 + theta; // [-PI:PI]
 
     // 8 shape trajectory
-    double T = 75, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
+    double T = 45, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
     double r = 0.6, h = 1.4, d_h = 0.3;
+	double kroll = 3.0/9, kpitch = 1;
+	double x_init = -0.6, y_init = -0.6;
 
     double t_ = 1e-6 * (double)(t - t0_);
     if(t0_set_ && ((int)t_ / (int)T > lap_count_))
@@ -231,6 +233,8 @@ void OffboardControl::publish_trajectory_setpoint()
         log_switch_msg.data = log_flag_;
         log_switch_publisher_->publish(log_switch_msg);
         lap_count_ = (int)t_ / (int)T;
+		if(lap_count_ == 3)
+			exit(0);
     }
     while(t_ > T)
         t_ -= T;
@@ -317,8 +321,10 @@ void OffboardControl::publish_trajectory_setpoint()
         dYaw = 0;
     }
 
-    msg.roll *= 6.0/9;
-    dRoll *= 6.0/9;
+    msg.roll *= kroll;
+    dRoll *= kpitch;
+	msg.x += x_init;
+	msg.y += y_init;
 
     double wx, wy, wz;
     setAngularVel(wx, wy, wz, (double)msg.roll, (double)msg.pitch, dRoll, dPitch, dYaw);
