@@ -221,8 +221,8 @@ void OffboardControl::publish_trajectory_setpoint()
     // 8 shape trajectory
     double T = 45, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
     double r = 0.6, h = 1.4, d_h = 0.3;
-	double kroll = 3.0/9, kpitch = 1;
-	double x_init = -0.6, y_init = -0.6;
+	double kroll = 6.0/9, kpitch = 1;
+	double x_init = 0, y_init = 0;
 
     double t_ = 1e-6 * (double)(t - t0_);
     if(t0_set_ && ((int)t_ / (int)T > lap_count_))
