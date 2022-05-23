@@ -77,7 +77,7 @@ public:
 			}
 			// offboard_control_mode needs to be paired with trajectory_setpoint
 			publish_offboard_control_mode();
-			publish_trajectory_setpoint(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+			publish_trajectory_setpoint(1.0, 1.0, 1.0);
 			
 			// stop the counter after reaching 11
 			if (offboard_setpoint_counter_ < 11)
@@ -98,6 +98,7 @@ private:
 	rclcpp::Publisher<TrajectorySetpoint>::SharedPtr trajectory_setpoint_publisher_;
 	rclcpp::Publisher<VehicleCommand>::SharedPtr vehicle_command_publisher_;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr timesync_sub_;
+	rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr pos_subscription_;
 	rclcpp::Subscription<trajectory_msgs::msg::MultiDOFJointTrajectory>::SharedPtr traj_sub_;
 
 	std::atomic<uint64_t> timestamp_; //!< common synced timestamped
