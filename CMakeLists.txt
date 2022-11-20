@@ -49,9 +49,10 @@ find_package(geometry_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 
 find_package(PythonInterp 3 REQUIRED)
-if(ROS_DISTRO IN_LIST ROS_DISTROS)
-  find_package(eigen3_cmake_module REQUIRED)
-endif()
+find_package(eigen3_cmake_module REQUIRED)
+# find_package(tf2 REQUIRED)
+# find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 
 ###################################
@@ -75,6 +76,9 @@ function(custom_executable subfolder target)
     px4_msgs
     geometry_msgs
     trajectory_msgs
+    Eigen3
+    tf2
+    tf2_geometry_msgs
   )
   install(TARGETS ${target}
   DESTINATION lib/${PROJECT_NAME})
@@ -97,8 +101,10 @@ target_link_libraries(micrortps_agent fastrtps fastcdr)
 # Add examples
 custom_executable(examples/listeners sensor_combined_listener)
 custom_executable(examples/listeners vehicle_gps_position_listener)
+custom_executable(examples/listeners ros1_bridge_test)
 custom_executable(examples/advertisers debug_vect_advertiser)
 custom_executable(examples/offboard offboard_control)
+custom_executable(examples/offboard offboard_control_omni_planner)
 
 ############
 # Install ##

@@ -36,7 +36,6 @@
  * @addtogroup examples
  * @author Mickey Cowden <info@cowden.tech>
  * @author Nuno Marques <nuno.marques@dronesolutions.io>
-
  * The TrajectorySetpoint message and the OFFBOARD mode in general are under an ongoing update.
  * Please refer to PR: https://github.com/PX4/PX4-Autopilot/pull/16739 for more info. 
  * As per PR: https://github.com/PX4/PX4-Autopilot/pull/17094, the format
@@ -48,23 +47,88 @@
 #include <px4_msgs/msg/timesync.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
 #include <px4_msgs/msg/vehicle_control_mode.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <stdint.h>
-#include <string>
 
-#include <cmath>
 #include <chrono>
 #include <iostream>
+#include <math.h>
+#include <Eigen/Eigen>
+#include <Eigen/Dense>
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
 using namespace px4_msgs::msg;
 
-class OffboardControl : public rclcpp::Node
-{
+double range_angle(double angle) {
+  while (angle >= M_PI) {
+    angle -= 2 * M_PI;
+  }
+  while (angle <= -M_PI) {
+    angle += 2 * M_PI;
+  }
+  return angle;
+}
+
+Eigen::Vector3d QuatToEuler(Eigen::Quaterniond q) {
+  Eigen::Vector3d euler;
+  double sinr_cosp = 2 * (q.w() * q.x() + q.y() * q.z());
+  double cosr_cosp = 1 - 2 * (q.x() * q.x() + q.y() * q.y());
+  euler[0] = std::atan2(sinr_cosp, cosr_cosp);
+
+  double sinp = 2 * (q.w() * q.y() - q.z() * q.x());
+  if (std::abs(sinp) >= 1) euler[1] = std::copysign(M_PI_2, sinp);
+  else euler[1] = std::asin(sinp);
+
+  double siny_cosp = 2 * (q.w() * q.z() + q.x() * q.y());
+  double cosy_cosp = 1 - 2 * (q.y() * q.y() + q.z() * q.z());
+  euler[2] = std::atan2(siny_cosp, cosy_cosp);
+  return euler;
+}
+
+TrajectorySetpoint GeomPoseToTrajSetpoint(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+    Eigen::Matrix3d ENU2NED_trans;
+    ENU2NED_trans << 0, 1, 0,
+        1, 0, 0,
+        0, 0, -1;
+    Eigen::Quaterniond quat_trans(ENU2NED_trans);
+//    std::cout << quat_trans.toRotationMatrix().eulerAngles(2, 1, 0).transpose() << "\n";
+    Eigen::Quaterniond quat_before(msg->pose.orientation.w,
+                                   msg->pose.orientation.x,
+                                   msg->pose.orientation.y,
+                                   msg->pose.orientation.z);
+    std::cout << quat_before.w() << " "
+              << quat_before.x() << " "
+              << quat_before.y() << " "
+              << quat_before.z() << "\n";
+//    std::cout << "euler: " << QuatToEuler(quat_before).transpose() << "\n";
+//    Eigen::Quaterniond quat_after = quat_trans * quat_before;
+    Eigen::Quaterniond quat_after = quat_before;
+//    Eigen::Vector3d euler_angle = quat_after.toRotationMatrix().eulerAngles(0, 1, 2);
+    Eigen::Vector3d euler_angle = QuatToEuler(quat_after);
+    Eigen::Vector3d pos_before(msg->pose.position.x,
+                               msg->pose.position.y,
+                               msg->pose.position.z);
+    Eigen::Vector3d pos_after = ENU2NED_trans * pos_before;
+
+    TrajectorySetpoint setpoint_msg{};
+    setpoint_msg.x = pos_after[0];
+    setpoint_msg.y = pos_after[1];
+    setpoint_msg.z = pos_after[2];
+    setpoint_msg.yaw   = -range_angle(euler_angle[2]);
+    setpoint_msg.pitch = range_angle(euler_angle[0]);
+    setpoint_msg.roll  = range_angle(euler_angle[1]);
+//  setpoint_msg.yaw   = M_PI_2;
+//  setpoint_msg.pitch = 0.0;
+//  setpoint_msg.roll  = 0.0;
+    return setpoint_msg;
+}
+
+
+class OffboardControl : public rclcpp::Node {
 public:
-	OffboardControl() : Node("offboard_control")
-	{
+	OffboardControl() : Node("offboard_control") {
 #ifdef ROS_DEFAULT_API
 		offboard_control_mode_publisher_ =
 			this->create_publisher<OffboardControlMode>("OffboardControlMode_PubSubTopic", 10);
@@ -84,17 +148,27 @@ public:
 		// get common timestamp
 		timesync_sub_ =
 			this->create_subscription<px4_msgs::msg::Timesync>("Timesync_PubSubTopic", 10,
-															   [this](const px4_msgs::msg::Timesync::UniquePtr msg)
-															   {
-																   timestamp_.store(msg->timestamp);
-															   });
+				[this](const px4_msgs::msg::Timesync::UniquePtr msg) {
+					timestamp_.store(msg->timestamp);
+				});
+
+                knot_point_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+                    "/omnihex_setpoint",
+#ifdef ROS_DEFAULT_API
+                    10,
+#endif
+                    [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+                      getTrajectory = true;
+                      TrajectorySetpoint traj_setpoint_msg = GeomPoseToTrajSetpoint(msg);
+                      publish_offboard_control_mode();
+                      trajectory_setpoint_publisher_->publish(traj_setpoint_msg);
+                    });
 
 		offboard_setpoint_counter_ = 0;
 
-		auto timer_callback = [this]() -> void
-		{
-			if (offboard_setpoint_counter_ == 10)
-			{
+		auto timer_callback = [this]() -> void {
+
+			if (offboard_setpoint_counter_ == 10) {
 				// Change to Offboard mode after 10 setpoints
 				this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
 
@@ -102,13 +176,14 @@ public:
 				this->arm();
 			}
 
-			// offboard_control_mode needs to be paired with trajectory_setpoint
+            		// offboard_control_mode needs to be paired with trajectory_setpoint
 			publish_offboard_control_mode();
-			publish_trajectory_setpoint();
+                        if (!getTrajectory) {
+                          publish_trajectory_setpoint();
+                        }
 
-			// stop the counter after reaching 11
-			if (offboard_setpoint_counter_ < 11)
-			{
+           		 // stop the counter after reaching 11
+			if (offboard_setpoint_counter_ < 11) {
 				offboard_setpoint_counter_++;
 			}
 		};
@@ -119,30 +194,29 @@ public:
 	void disarm() const;
 
 private:
+        bool getTrajectory=false;
 	rclcpp::TimerBase::SharedPtr timer_;
 
 	rclcpp::Publisher<OffboardControlMode>::SharedPtr offboard_control_mode_publisher_;
 	rclcpp::Publisher<TrajectorySetpoint>::SharedPtr trajectory_setpoint_publisher_;
 	rclcpp::Publisher<VehicleCommand>::SharedPtr vehicle_command_publisher_;
 	rclcpp::Subscription<px4_msgs::msg::Timesync>::SharedPtr timesync_sub_;
+        rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr knot_point_sub_;
 
-	std::atomic<uint64_t> timestamp_; //!< common synced timestamped
-	uint64_t t0_{};
-	bool t0_set_{false};
+	std::atomic<uint64_t> timestamp_;   //!< common synced timestamped
 
-	uint64_t offboard_setpoint_counter_; //!< counter for the number of setpoints sent
+	uint64_t offboard_setpoint_counter_;   //!< counter for the number of setpoints sent
 
 	void publish_offboard_control_mode() const;
-	void publish_trajectory_setpoint();
+	void publish_trajectory_setpoint() const;
 	void publish_vehicle_command(uint16_t command, float param1 = 0.0,
-								 float param2 = 0.0) const;
+				     float param2 = 0.0) const;
 };
 
 /**
  * @brief Send a command to Arm the vehicle
  */
-void OffboardControl::arm() const
-{
+void OffboardControl::arm() const {
 	publish_vehicle_command(VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0);
 
 	RCLCPP_INFO(this->get_logger(), "Arm command send");
@@ -151,8 +225,7 @@ void OffboardControl::arm() const
 /**
  * @brief Send a command to Disarm the vehicle
  */
-void OffboardControl::disarm() const
-{
+void OffboardControl::disarm() const {
 	publish_vehicle_command(VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 0.0);
 
 	RCLCPP_INFO(this->get_logger(), "Disarm command send");
@@ -162,8 +235,7 @@ void OffboardControl::disarm() const
  * @brief Publish the offboard control mode.
  *        For this example, only position and altitude controls are active.
  */
-void OffboardControl::publish_offboard_control_mode() const
-{
+void OffboardControl::publish_offboard_control_mode() const {
 	OffboardControlMode msg{};
 	msg.timestamp = timestamp_.load();
 	msg.position = true;
@@ -175,86 +247,29 @@ void OffboardControl::publish_offboard_control_mode() const
 	offboard_control_mode_publisher_->publish(msg);
 }
 
+
 /**
  * @brief Publish a trajectory setpoint
  *        For this example, it sends a trajectory setpoint to make the
  *        vehicle hover at 5 meters with a yaw angle of 180 degrees.
  */
-void OffboardControl::publish_trajectory_setpoint()
-{
-	if(offboard_setpoint_counter_ == 11 && (!t0_set_))
-	{
-		t0_ = timestamp_.load();
-		t0_set_ = true;
-	}
-	
+void OffboardControl::publish_trajectory_setpoint() const {
 	TrajectorySetpoint msg{};
-	uint64_t t = timestamp_.load();
+	// msg.timestamp = timestamp_.load();
+	msg.x = 0;
+	msg.y = 0;
+	msg.z = -1.0;
+	msg.yaw = 0; // [-PI:PI]
+        msg.pitch = -0; // [-PI:PI]
+        msg.roll = -0; // [-PI:PI]
+        std::cout << "Publishing msg: " << msg.x << " "
+                                        << msg.y << " "
+                                        << msg.z << " "
+                                        << msg.yaw << " "
+                                        << msg.pitch << " "
+                                        << msg.roll << std::endl;
 
-    // circle trajectory
-//	float theta = 0.3 * 1e-6 * (t - t0_);
-//	msg.timestamp = t;
-//	msg.x = 0 + 4 * sin(theta);
-//	msg.y = 4 - 4 * cos(theta);
-//	msg.z = -2.5 + sin(theta);
-//	msg.roll = 0 + sin(theta);
-//	msg.pitch = 0 + sin(theta);
-//	msg.yaw = M_PI_2 + theta; // [-PI:PI]
-
-    // 8 shape trajectory
-    double T = 40, t_1 = T / (3 * M_PI + 4), t_2 = 3 * M_PI * T / (6 * M_PI + 8);
-    double r = 1.5, h = 2.5, d_h = 0.5;
-    double t_ = 1e-6 * (t - t0_);
-    while(t_ > T)
-        t_ -= T;
-    msg.z = -h - d_h + d_h * cos(2 * M_PI / (2 * t_1 + t_2) * t_);
-    msg.pitch = d_h * 2 * M_PI / (2 * t_1 + t_2) * sin(2 * M_PI / (2 * t_1 + t_2) * t_);
-    if(t_ >= 0 && t_ < t_1)
-    {
-        msg.x = 0;
-        msg.y = r / t_1 * t_;
-        msg.roll = 0;
-        msg.yaw = M_PI_2;
-    }
-    if(t_ >= t_1 && t_ < t_1 + t_2)
-    {
-        double omega = 3 * M_PI / (2 * t_2);
-        msg.x = -r + r * cos(omega * (t_ - t_1));
-        msg.y = r + r * sin(omega * (t_ - t_1));
-        msg.roll = M_PI / 4 - M_PI / 4 * cos(2 * M_PI / t_2 * (t_ - t_1));
-        msg.yaw = M_PI / 2 + omega * (t_ - t_1);
-    }
-    if(t_ >= t_1 + t_2 && t_ < 3 * t_1 + t_2)
-    {
-        msg.x = -r + r / t_1 * (t_ - t_1 - t_2);
-        msg.y = 0;
-        msg.roll = 0;
-        msg.yaw = 0;
-    }
-    if(t_ >= 3 * t_1 + t_2 && t_ < T - t_1)
-    {
-        double omega = 3 * M_PI / (2 * t_2);
-        msg.x = r + r * sin(omega * (t_ - 3 * t_1 - t_2));
-        msg.y = -r + r * cos(omega * (t_ - 3 * t_1 - t_2));
-        msg.roll = -M_PI / 4 + M_PI / 4 * cos(2 * M_PI / t_2 * (t_ - 3 * t_1 - t_2));
-        msg.yaw = -omega * (t_ - 3 * t_1 - t_2);
-    }
-    if(t_ >= T - t_1 && t_ < T)
-    {
-        msg.x = 0;
-        msg.y = -r + r / t_1 * (t_ - (T - t_1));
-        msg.roll = 0;
-        msg.yaw = M_PI_2;
-    }
-
-
-	while(msg.yaw > M_PI)
-		msg.yaw -= M_PI * 2;
-	while(msg.yaw < -M_PI)
-		msg.yaw += M_PI * 2;
-
-    if(t0_set_)
-	    trajectory_setpoint_publisher_->publish(msg);
+	trajectory_setpoint_publisher_->publish(msg);
 }
 
 /**
@@ -264,8 +279,7 @@ void OffboardControl::publish_trajectory_setpoint()
  * @param param2    Command parameter 2
  */
 void OffboardControl::publish_vehicle_command(uint16_t command, float param1,
-											  float param2) const
-{
+					      float param2) const {
 	VehicleCommand msg{};
 	msg.timestamp = timestamp_.load();
 	msg.param1 = param1;
@@ -280,8 +294,7 @@ void OffboardControl::publish_vehicle_command(uint16_t command, float param1,
 	vehicle_command_publisher_->publish(msg);
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char* argv[]) {
 	std::cout << "Starting offboard control node..." << std::endl;
 	setvbuf(stdout, NULL, _IONBF, BUFSIZ);
 	rclcpp::init(argc, argv);
