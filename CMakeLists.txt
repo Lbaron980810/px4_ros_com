@@ -105,6 +105,7 @@ custom_executable(examples/listeners ros1_bridge_test)
 custom_executable(examples/advertisers debug_vect_advertiser)
 custom_executable(examples/offboard offboard_control)
 custom_executable(examples/offboard offboard_control_omni_planner)
+custom_executable(examples/offboard offboard_control_pose_trans)
 
 ############
 # Install ##
